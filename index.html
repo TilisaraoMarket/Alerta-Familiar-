@@ -350,20 +350,21 @@
         renderContacts();
     };
 
-        // Reemplazar la función actual del botón de envío con esta versión mejorada:
-        document.getElementById('sendWhatsAppBtn').onclick = async function() {
+    // Función mejorada para enviar mensajes de WhatsApp secuencialmente
+    document.getElementById('sendWhatsAppBtn').onclick = async function() {
         if (emergencyContacts.length === 0) {
             alert('Agrega al menos un contacto familiar.');
             return;
         }
     
         try {
+            // Obtener ubicación
             const locationLink = await getCurrentLocation();
             const baseMessage = document.getElementById('emergencyMessage').value;
             const messageWithLocation = `${baseMessage}\n\nMi ubicación actual:\n${locationLink}`;
     
-            // Crear array de URLs de WhatsApp
-            const whatsappUrls = emergencyContacts.map(contact => {
+            // Preparar los datos de contacto
+            const whatsappData = emergencyContacts.map(contact => {
                 const phoneNumber = contact.phone.replace(/[^0-9]/g, '');
                 return {
                     name: contact.name,
@@ -372,33 +373,64 @@
             });
     
             // Mostrar diálogo de confirmación
-            if (confirm(`Se enviarán mensajes a ${whatsappUrls.length} contactos. ¿Deseas continuar?`)) {
-                let currentIndex = 0;
-    
-                const openNextWhatsApp = () => {
-                    if (currentIndex < whatsappUrls.length) {
-                        const contact = whatsappUrls[currentIndex];
-                        
-                        // Abrir la ventana de WhatsApp
-                        const whatsappWindow = window.open(contact.url, '_blank');
-                        
-                        // Mostrar instrucciones al usuario
-                        alert(`Enviando mensaje a ${contact.name}.\n\nPor favor:\n1. Envía el mensaje en la ventana de WhatsApp\n2. Cierra la ventana de WhatsApp\n3. Presiona OK para continuar con el siguiente contacto`);
-                        
-                        currentIndex++;
-                        openNextWhatsApp();
-                    } else {
-                        alert('¡Todos los mensajes han sido procesados!');
+            if (confirm(`Se enviarán mensajes a ${whatsappData.length} contactos. ¿Deseas continuar?`)) {
+                // Actualizar el botón para mostrar progreso
+                const sendButton = document.getElementById('sendWhatsAppBtn');
+                const originalButtonText = sendButton.innerHTML;
+                
+                // Función para enviar mensajes secuencialmente
+                async function sendMessagesSequentially(contacts, currentIndex = 0) {
+                    // Si hemos terminado con todos los contactos
+                    if (currentIndex >= contacts.length) {
+                        sendButton.innerHTML = originalButtonText;
+                        sendButton.disabled = false;
+                        alert('¡Todos los mensajes han sido enviados!');
+                        return;
                     }
-                };
-    
-                // Iniciar el proceso
-                openNextWhatsApp();
+                    
+                    const contact = contacts[currentIndex];
+                    
+                    // Actualizar botón con progreso
+                    sendButton.innerHTML = `Enviando a ${contact.name} (${currentIndex + 1}/${contacts.length})`;
+                    
+                    // Abrir WhatsApp en una nueva ventana
+                    const whatsappWindow = window.open(contact.url, '_blank');
+                    
+                    // Esperar confirmación del usuario antes de continuar
+                    const userConfirmed = await new Promise(resolve => {
+                        setTimeout(() => {
+                            const confirmed = confirm(
+                                `Mensaje para ${contact.name} (${currentIndex + 1}/${contacts.length}):\n\n` +
+                                '1. Envía el mensaje en la ventana de WhatsApp\n' +
+                                '2. Presiona OK cuando hayas enviado el mensaje\n\n' +
+                                'Presiona Cancelar para detener el envío de mensajes'
+                            );
+                            resolve(confirmed);
+                        }, 1000); // Pequeña pausa para asegurar que la ventana se abra primero
+                    });
+                    
+                    // Si el usuario canceló, detener el proceso
+                    if (!userConfirmed) {
+                        sendButton.innerHTML = originalButtonText;
+                        sendButton.disabled = false;
+                        alert('Envío de mensajes cancelado.');
+                        return;
+                    }
+                    
+                    // Continuar con el siguiente contacto
+                    sendMessagesSequentially(contacts, currentIndex + 1);
+                }
+                
+                // Iniciar el proceso de envío
+                sendButton.disabled = true;
+                sendMessagesSequentially(whatsappData);
             }
         } catch (error) {
             alert(`Error: ${error}`);
+            document.getElementById('sendWhatsAppBtn').disabled = false;
         }
     };
+
     document.getElementById('exportBtn').onclick = exportContacts;
 
     document.getElementById('importFile').addEventListener('change', function(e) {
@@ -416,3 +448,4 @@
 </script>
 </body>
 </html>
+</qodoArtifact>
