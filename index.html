@@ -351,7 +351,7 @@
     };
 
         // Reemplazar la función actual del botón de envío con esta versión mejorada:
-    document.getElementById('sendWhatsAppBtn').onclick = async function() {
+        document.getElementById('sendWhatsAppBtn').onclick = async function() {
         if (emergencyContacts.length === 0) {
             alert('Agrega al menos un contacto familiar.');
             return;
@@ -372,16 +372,28 @@
             });
     
             // Mostrar diálogo de confirmación
-            if (confirm(`Se abrirán ${whatsappUrls.length} ventanas de WhatsApp. ¿Deseas continuar?`)) {
-                // Abrir URLs secuencialmente con un pequeño retraso
-                for (let i = 0; i < whatsappUrls.length; i++) {
-                    setTimeout(() => {
-                        window.open(whatsappUrls[i].url, `whatsapp_${i}`);
-                        console.log(`Abriendo chat para ${whatsappUrls[i].name}`);
-                    }, i * 1000); // 1 segundo de retraso entre cada ventana
-                }
-                
-                alert('Abriendo chats de WhatsApp...\nPor favor, permite las ventanas emergentes si el navegador lo solicita.');
+            if (confirm(`Se enviarán mensajes a ${whatsappUrls.length} contactos. ¿Deseas continuar?`)) {
+                let currentIndex = 0;
+    
+                const openNextWhatsApp = () => {
+                    if (currentIndex < whatsappUrls.length) {
+                        const contact = whatsappUrls[currentIndex];
+                        
+                        // Abrir la ventana de WhatsApp
+                        const whatsappWindow = window.open(contact.url, '_blank');
+                        
+                        // Mostrar instrucciones al usuario
+                        alert(`Enviando mensaje a ${contact.name}.\n\nPor favor:\n1. Envía el mensaje en la ventana de WhatsApp\n2. Cierra la ventana de WhatsApp\n3. Presiona OK para continuar con el siguiente contacto`);
+                        
+                        currentIndex++;
+                        openNextWhatsApp();
+                    } else {
+                        alert('¡Todos los mensajes han sido procesados!');
+                    }
+                };
+    
+                // Iniciar el proceso
+                openNextWhatsApp();
             }
         } catch (error) {
             alert(`Error: ${error}`);
