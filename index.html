@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -184,6 +185,29 @@
         .toggle-config i {
             margin-right: 0.5rem;
         }
+        /* Mejoras para dispositivos móviles */
+        @media (max-width: 640px) {
+            .utility-buttons {
+                flex-wrap: wrap;
+            }
+            .utility-btn, label[for="importFile"] {
+                width: 100%;
+                margin-bottom: 0.5rem;
+                text-align: center;
+            }
+            .modal-content {
+                width: 95%;
+                max-height: 80vh;
+                overflow-y: auto;
+            }
+            .modal-buttons {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            .modal-buttons button {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -243,16 +267,16 @@
         </div>
         <div class="mb-4">
             <label class="block mb-1 font-semibold">Agregar familiar:</label>
-            <div class="flex gap-2">
+            <div class="flex gap-2 flex-wrap">
                 <input
                     id="contactName"
-                    class="input-field flex-1 p-2 rounded bg-gray-800 text-white border border-gray-600"
+                    class="input-field flex-1 p-2 rounded bg-gray-800 text-white border border-gray-600 min-w-[120px]"
                     placeholder="Nombre"
                     type="text"
                 />
                 <input
                     id="contactPhone"
-                    class="input-field flex-1 p-2 rounded bg-gray-800 text-white border border-gray-600"
+                    class="input-field flex-1 p-2 rounded bg-gray-800 text-white border border-gray-600 min-w-[120px]"
                     placeholder="Teléfono (con código país, ej: 5492664...)"
                     type="text"
                 />
@@ -325,18 +349,41 @@
     </div>
 </div>
 
+<!-- Modal de error de geolocalización -->
+<div id="geoErrorModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3 class="text-xl font-bold mb-2 text-red-400">Error de ubicación</h3>
+        <p id="geoErrorMessage" class="mb-4">No se pudo obtener tu ubicación actual.</p>
+        <div class="modal-buttons">
+            <button id="retryLocationBtn" class="utility-btn bg-blue-600 hover:bg-blue-700">
+                Reintentar
+            </button>
+            <button id="skipLocationBtn" class="utility-btn bg-gray-600 hover:bg-gray-700">
+                Continuar sin ubicación
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
     // --- UI y lógica principal ---
     let emergencyContacts = [];
     let isApiSending = false;
     let cancelApiSending = false;
+    let locationObtained = false;
+    let currentLocationLink = "";
+    let isProcessingAction = false; // Flag para evitar múltiples clics
 
     // --- Persistencia con localStorage ---
     const STORAGE_KEY = 'emergencyContacts';
     const API_KEY_STORAGE = 'waliChatApiKey';
 
     function saveContactsToStorage() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(emergencyContacts));
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(emergencyContacts));
+        } catch (e) {
+            console.error("Error al guardar contactos:", e);
+        }
     }
 
     function loadContactsFromStorage() {
@@ -348,31 +395,61 @@
                 emergencyContacts = [];
             }
         } catch (e) {
+            console.error("Error al cargar contactos:", e);
             emergencyContacts = [];
         }
     }
 
     // Cargar API Key si existe
     function loadApiKey() {
-        const savedApiKey = localStorage.getItem(API_KEY_STORAGE);
-        if (savedApiKey) {
-            document.getElementById('apiKey').value = savedApiKey;
-            document.getElementById('saveApiKey').checked = true;
+        try {
+            const savedApiKey = localStorage.getItem(API_KEY_STORAGE);
+            if (savedApiKey) {
+                document.getElementById('apiKey').value = savedApiKey;
+                document.getElementById('saveApiKey').checked = true;
+            }
+        } catch (e) {
+            console.error("Error al cargar API key:", e);
         }
     }
 
     // Guardar API Key si el usuario lo permite
     function saveApiKey() {
-        const apiKey = document.getElementById('apiKey').value.trim();
-        const saveKey = document.getElementById('saveApiKey').checked;
-        
-        if (saveKey && apiKey) {
-            localStorage.setItem(API_KEY_STORAGE, apiKey);
-        } else if (!saveKey) {
-            localStorage.removeItem(API_KEY_STORAGE);
+        try {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const saveKey = document.getElementById('saveApiKey').checked;
+            
+            if (saveKey && apiKey) {
+                localStorage.setItem(API_KEY_STORAGE, apiKey);
+            } else if (!saveKey) {
+                localStorage.removeItem(API_KEY_STORAGE);
+            }
+        } catch (e) {
+            console.error("Error al guardar API key:", e);
         }
     }
 
+    // Mostrar modal de error de geolocalización
+    function showGeoErrorModal(errorMessage) {
+        document.getElementById('geoErrorMessage').textContent = errorMessage;
+        document.getElementById('geoErrorModal').style.display = 'flex';
+        
+        return new Promise((resolve) => {
+            // Botón para reintentar
+            document.getElementById('retryLocationBtn').onclick = function() {
+                document.getElementById('geoErrorModal').style.display = 'none';
+                resolve('retry');
+            };
+            
+            // Botón para continuar sin ubicación
+            document.getElementById('skipLocationBtn').onclick = function() {
+                document.getElementById('geoErrorModal').style.display = 'none';
+                resolve('skip');
+            };
+        });
+    }
+
+    // Función mejorada para obtener ubicación
     function getCurrentLocation() {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
@@ -382,7 +459,7 @@
 
             const options = {
                 enableHighAccuracy: true,  // Alta precisión
-                timeout: 10000,           // 10 segundos máximo
+                timeout: 15000,           // 15 segundos máximo (aumentado para móviles)
                 maximumAge: 0             // No usar cache
             };
 
@@ -392,64 +469,117 @@
             sendButton.innerHTML = '📍 Obteniendo ubicación...';
             sendButton.disabled = true;
 
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
+            // Variable para controlar si la promesa ya se resolvió
+            let promiseHandled = false;
+
+            const geoSuccess = (position) => {
+                if (promiseHandled) return;
+                promiseHandled = true;
+                
+                try {
                     const latitude = position.coords.latitude;
                     const longitude = position.coords.longitude;
                     const accuracy = Math.round(position.coords.accuracy);
                     const googleMapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
+                    
+                    // Guardar la ubicación para uso futuro
+                    locationObtained = true;
+                    currentLocationLink = googleMapsLink;
                     
                     // Restaurar botón
                     sendButton.innerHTML = originalText;
                     sendButton.disabled = false;
                     
                     resolve(googleMapsLink);
-                },
-                (error) => {
-                    // Restaurar botón
+                } catch (error) {
+                    console.error("Error al procesar ubicación:", error);
                     sendButton.innerHTML = originalText;
                     sendButton.disabled = false;
+                    reject("Error al procesar la ubicación obtenida");
+                }
+            };
 
-                    // Manejar errores específicos
-                    let errorMessage = '';
-                    switch(error.code) {
-                        case error.PERMISSION_DENIED:
-                            errorMessage = 'No has dado permiso para acceder a tu ubicación';
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            errorMessage = 'La ubicación no está disponible en este momento';
-                            break;
-                        case error.TIMEOUT:
-                            errorMessage = 'Se agotó el tiempo de espera al obtener la ubicación';
-                            break;
-                        default:
-                            errorMessage = 'Error desconocido al obtener la ubicación';
+            const geoError = async (error) => {
+                if (promiseHandled) return;
+                promiseHandled = true;
+                
+                console.error("Error de geolocalización:", error);
+                
+                // Restaurar botón
+                sendButton.innerHTML = originalText;
+                sendButton.disabled = false;
+
+                // Manejar errores específicos
+                let errorMessage = '';
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMessage = 'No has dado permiso para acceder a tu ubicación';
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMessage = 'La ubicación no está disponible en este momento';
+                        break;
+                    case error.TIMEOUT:
+                        errorMessage = 'Se agotó el tiempo de espera al obtener la ubicación';
+                        break;
+                    default:
+                        errorMessage = 'Error desconocido al obtener la ubicación';
+                }
+                
+                // Mostrar modal de error y esperar respuesta del usuario
+                const userResponse = await showGeoErrorModal(errorMessage);
+                
+                if (userResponse === 'retry') {
+                    // El usuario quiere reintentar
+                    try {
+                        const newLocation = await getCurrentLocation();
+                        resolve(newLocation);
+                    } catch (retryError) {
+                        reject(retryError);
                     }
-                    reject(errorMessage);
-                },
-                options
-            );
+                } else {
+                    // El usuario quiere continuar sin ubicación
+                    locationObtained = false;
+                    currentLocationLink = "";
+                    resolve("");
+                }
+            };
+
+            // Iniciar la geolocalización
+            navigator.geolocation.getCurrentPosition(geoSuccess, geoError, options);
         });
     }
 
     // --- Exportar contactos a JSON ---
     function exportContacts() {
-        const dataStr = JSON.stringify(emergencyContacts, null, 2);
-        const blob = new Blob([dataStr], {type: "application/json"});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = "contactos_emergencia.json";
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }, 100);
+        if (isProcessingAction) return;
+        isProcessingAction = true;
+        
+        try {
+            const dataStr = JSON.stringify(emergencyContacts, null, 2);
+            const blob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "contactos_emergencia.json";
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                isProcessingAction = false;
+            }, 300);
+        } catch (error) {
+            console.error("Error al exportar contactos:", error);
+            alert("Error al exportar contactos: " + error.message);
+            isProcessingAction = false;
+        }
     }
 
     // --- Importar contactos desde JSON ---
     function importContactsFromFile(file) {
+        if (isProcessingAction) return;
+        isProcessingAction = true;
+        
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
@@ -463,8 +593,15 @@
                     alert('El archivo no tiene el formato correcto.');
                 }
             } catch (err) {
-                alert('Error al leer el archivo.');
+                console.error("Error al leer archivo:", err);
+                alert('Error al leer el archivo: ' + err.message);
+            } finally {
+                isProcessingAction = false;
             }
+        };
+        reader.onerror = function() {
+            alert('Error al leer el archivo.');
+            isProcessingAction = false;
         };
         reader.readAsText(file);
     }
@@ -602,8 +739,10 @@
             
             if (failCount > 0) {
                 alert(`Envío completado: ${successCount} mensajes enviados correctamente, ${failCount} fallidos.`);
-            } else {
+            } else if (successCount > 0) {
                 alert(`¡Todos los ${successCount} mensajes han sido enviados correctamente!`);
+            } else {
+                alert('No se enviaron mensajes.');
             }
         }, 3000);
     }
@@ -616,20 +755,31 @@
         contactInfo.textContent = `Enviando a: ${contact.name} (${currentIndex + 1}/${total})`;
         modal.style.display = 'flex';
         
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             // Botón para continuar con el siguiente contacto
-            document.getElementById('continueBtn').onclick = function() {
+            const continueBtn = document.getElementById('continueBtn');
+            const stopBtn = document.getElementById('stopSendingBtn');
+            
+            // Eliminar eventos anteriores para evitar duplicados
+            const newContinueBtn = continueBtn.cloneNode(true);
+            const newStopBtn = stopBtn.cloneNode(true);
+            
+            continueBtn.parentNode.replaceChild(newContinueBtn, continueBtn);
+            stopBtn.parentNode.replaceChild(newStopBtn, stopBtn);
+            
+            // Asignar nuevos eventos
+            newContinueBtn.addEventListener('click', function() {
                 modal.style.display = 'none';
                 resolve(true);
-            };
+            });
             
-            // Botón para detener el envío
-            document.getElementById('stopSendingBtn').onclick = function() {
+            newStopBtn.addEventListener('click', function() {
                 modal.style.display = 'none';
                 resolve(false);
-            };
+            });
         });
     }
+    
 
     // Función para enviar mensajes abriendo pestañas de WhatsApp Web
     async function sendMessagesWithWebTabs(contacts, message) {
@@ -658,26 +808,33 @@
             document.getElementById('sendWhatsAppBtn').innerHTML = 
                 `Enviando a ${contact.name} (${currentIndex + 1}/${contacts.length})`;
             
-            // Abrir WhatsApp en una nueva ventana
-            const whatsappWindow = window.open(contact.url, '_blank');
-            
-            // Mostrar modal de instrucciones y esperar confirmación
-            const userConfirmed = await showInstructionsModal(
-                contact, 
-                currentIndex, 
-                contacts.length
-            );
-            
-            // Si el usuario canceló, detener el proceso
-            if (!userConfirmed) {
+            try {
+                // Abrir WhatsApp en una nueva ventana
+                const whatsappWindow = window.open(contact.url, '_blank');
+                
+                // Mostrar modal de instrucciones y esperar confirmación
+                const userConfirmed = await showInstructionsModal(
+                    contact, 
+                    currentIndex, 
+                    contacts.length
+                );
+                
+                // Si el usuario canceló, detener el proceso
+                if (!userConfirmed) {
+                    document.getElementById('sendWhatsAppBtn').innerHTML = '🚨 Avisar a toda la familia por WhatsApp';
+                    document.getElementById('sendWhatsAppBtn').disabled = false;
+                    alert('Envío de mensajes cancelado.');
+                    return;
+                }
+                
+                // Continuar con el siguiente contacto
+                sendMessagesSequentially(contacts, currentIndex + 1);
+            } catch (error) {
+                console.error("Error al enviar mensaje:", error);
                 document.getElementById('sendWhatsAppBtn').innerHTML = '🚨 Avisar a toda la familia por WhatsApp';
                 document.getElementById('sendWhatsAppBtn').disabled = false;
-                alert('Envío de mensajes cancelado.');
-                return;
+                alert(`Error al enviar mensaje: ${error.message || error}`);
             }
-            
-            // Continuar con el siguiente contacto
-            sendMessagesSequentially(contacts, currentIndex + 1);
         }
         
         // Iniciar el proceso de envío
