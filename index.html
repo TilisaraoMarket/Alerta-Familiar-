@@ -111,7 +111,7 @@
         label[for="importFile"]:hover {
             background: #64748b;
         }
-        /* Estilos para el modal de progreso */
+        /* Estilos para modales (progreso e instrucciones) */
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -131,6 +131,13 @@
             max-width: 90%;
             width: 400px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .modal-content ol {
+            list-style-type: decimal;
+            padding-left: 1.5rem;
+        }
+        .modal-content ol li {
+            margin-bottom: 0.5rem;
         }
         .progress-bar {
             width: 100%;
@@ -291,6 +298,28 @@
         <div class="modal-buttons">
             <button id="cancelSendingBtn" class="utility-btn bg-red-600 hover:bg-red-700">
                 Cancelar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de instrucciones para envío manual -->
+<div id="instructionsModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3 class="text-xl font-bold mb-2">Instrucciones de envío</h3>
+        <p id="instructionText" class="mb-4">Sigue estos pasos para enviar el mensaje:</p>
+        <ol class="mb-4">
+            <li>Se abrirá WhatsApp Web para cada contacto</li>
+            <li>Envía el mensaje presionando el botón de enviar en WhatsApp</li>
+            <li>Regresa a esta ventana y presiona "Continuar" para pasar al siguiente contacto</li>
+        </ol>
+        <p id="currentContactInfo" class="text-sm font-semibold mb-4"></p>
+        <div class="modal-buttons">
+            <button id="continueBtn" class="utility-btn bg-green-600 hover:bg-green-700">
+                Continuar con el siguiente
+            </button>
+            <button id="stopSendingBtn" class="utility-btn bg-red-600 hover:bg-red-700">
+                Detener envío
             </button>
         </div>
     </div>
@@ -579,6 +608,29 @@
         }, 3000);
     }
 
+    // Función para mostrar el modal de instrucciones
+    function showInstructionsModal(contact, currentIndex, total) {
+        const modal = document.getElementById('instructionsModal');
+        const contactInfo = document.getElementById('currentContactInfo');
+        
+        contactInfo.textContent = `Enviando a: ${contact.name} (${currentIndex + 1}/${total})`;
+        modal.style.display = 'flex';
+        
+        return new Promise((resolve) => {
+            // Botón para continuar con el siguiente contacto
+            document.getElementById('continueBtn').onclick = function() {
+                modal.style.display = 'none';
+                resolve(true);
+            };
+            
+            // Botón para detener el envío
+            document.getElementById('stopSendingBtn').onclick = function() {
+                modal.style.display = 'none';
+                resolve(false);
+            };
+        });
+    }
+
     // Función para enviar mensajes abriendo pestañas de WhatsApp Web
     async function sendMessagesWithWebTabs(contacts, message) {
         // Preparar los datos de contacto
@@ -609,18 +661,12 @@
             // Abrir WhatsApp en una nueva ventana
             const whatsappWindow = window.open(contact.url, '_blank');
             
-            // Esperar confirmación del usuario antes de continuar
-            const userConfirmed = await new Promise(resolve => {
-                setTimeout(() => {
-                    const confirmed = confirm(
-                        `Mensaje para ${contact.name} (${currentIndex + 1}/${contacts.length}):\n\n` +
-                        '1. Envía el mensaje en la ventana de WhatsApp\n' +
-                        '2. Presiona OK cuando hayas enviado el mensaje\n\n' +
-                        'Presiona Cancelar para detener el envío de mensajes'
-                    );
-                    resolve(confirmed);
-                }, 1000); // Pequeña pausa para asegurar que la ventana se abra primero
-            });
+            // Mostrar modal de instrucciones y esperar confirmación
+            const userConfirmed = await showInstructionsModal(
+                contact, 
+                currentIndex, 
+                contacts.length
+            );
             
             // Si el usuario canceló, detener el proceso
             if (!userConfirmed) {
